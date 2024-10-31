@@ -1,0 +1,292 @@
+import { Alert, Button, IconDraftStatus, Select } from '@adtech/ui';
+import { NumberInput } from '@adtech/ui/dist/components/Input/NumberInput';
+import ArrowDown from '@assets/SVG/components/arrow-down.svg';
+import ConversionAndTrafficIcon from '@assets/SVG/components/conversion-and-traffic.svg';
+import ADTAccordeon from '@components/ADTAccordeon/ADTAccordeon';
+import SBACardRadio from '@components/SBACardRadio/SBACardRadio';
+import SBACustomSelectOption from '@components/SBACustomSelectOption/SBACustomSelectOption';
+import SBAFormItem from '@components/SBAFormItem/SBAFormItem';
+import SBAInput from '@components/SBAInput/SBAInput';
+import { CampaignDTOOptimizationGoal } from '@entities/CampaignDTOOptimizationGoal';
+import { CampaignDTOOptimizationStrategy } from '@entities/CampaignDTOOptimizationStrategy';
+import { Col, Row } from 'antd';
+import { useFormik } from 'formik';
+import * as React from 'react';
+import { FC, useEffect } from 'react';
+import * as Yup from 'yup';
+import {
+    OptimizationGoalEnumNames,
+    OptimizationStrategyEnumDescriptions,
+    OptimizationStrategyEnumIcons,
+    OptimizationStrategyEnumNames,
+    TCampaignDTO,
+} from '../../Campaigns.model';
+import './CampaignFirstStep.styles.less';
+import { useNavigate } from 'react-router-dom';
+
+type TFirstStepFormikFields =
+    | 'name'
+    | 'optimizationGoal'
+    | 'optimizationStrategy'
+    | 'optimizationCost'
+    | 'hasStatistics';
+
+type TFirstStepFormik = Pick<TCampaignDTO, TFirstStepFormikFields>;
+
+interface IProps {
+    value?: TCampaignDTO;
+    onChange: (val: TFirstStepFormik, changeStep?: boolean) => void;
+    currentStepIndex: number;
+    isCreate?: boolean;
+}
+
+const CampaignFirstStep: FC<IProps> = ({ value, onChange, currentStepIndex, isCreate }) => {
+    const navigate = useNavigate();
+
+
+const { submitForm, errors, values, setFieldValue, setValues, validateField, touched, setFieldTouched } =
+    useFormik<TFirstStepFormik>({
+        initialValues: {
+            name: 'Кампания',
+            optimizationGoal: CampaignDTOOptimizationGoal.TRAFFIC,
+            optimizationStrategy: CampaignDTOOptimizationStrategy.MAX_CLICK_MIN_COST,
+            optimizationCost: 0,
+        },
+        validateOnChange: false,
+        validationSchema: Yup.object({
+            name: Yup.string()
+                .max(255, 'Название должно быть не более 255 символов')
+                .required('Укажите название кампании'),
+            optimizationGoal: Yup.mixed<CampaignDTOOptimizationGoal>()
+                .oneOf([...Object.values(CampaignDTOOptimizationGoal), null])
+                .nullable(),
+            // .required('Укажите цель оптимизации')
+            optimizationStrategy: Yup.mixed<CampaignDTOOptimizationStrategy>()
+                .nullable()
+                .oneOf([...Object.values(CampaignDTOOptimizationStrategy), null]),
+            // .required('Укажите стратегию оптимизации')
+            optimizationCost: Yup.number()
+                .nullable()
+                .when(['optimizationStrategy', 'optimizationGoal'], {
+                    is: (strategy: CampaignDTOOptimizationStrategy, goal: CampaignDTOOptimizationGoal) =>
+                        strategy === CampaignDTOOptimizationStrategy.MAX_CLICK_AVG_COST &&
+                        goal === CampaignDTOOptimizationGoal.TRAFFIC,
+                    then: Yup.number()
+                        .required('Укажите среднюю стоимость клика')
+                        .moreThan(0, 'Средняя стоимость за клик должна быть больше 0'),
+                }),
+        }),
+        onSubmit: (body) => {
+            onChange(body, true);
+        },
+    });
+
+useEffect(() => {
+    if (value) {
+        setValues(value, !isCreate);
+    }
+}, [value, isCreate, setValues]);
+
+const goalsTreeOptions = [
+    {
+        key: CampaignDTOOptimizationGoal.TRAFFIC,
+        label: (
+            <SBACustomSelectOption
+                icon={<ConversionAndTrafficIcon />}
+                title={OptimizationGoalEnumNames[CampaignDTOOptimizationGoal.TRAFFIC]}
+                description="Оптимизация под клики"
+            />
+        ),
+        strategies: [
+            CampaignDTOOptimizationStrategy.MAX_CLICK_MIN_COST,
+            CampaignDTOOptimizationStrategy.MAX_CLICK_AVG_COST,
+            CampaignDTOOptimizationStrategy.MAX_CONVERSION,
+        ],
+    },
+];
+
+const optimizationCostTitleDictionary = {
+    [CampaignDTOOptimizationStrategy.MAX_CLICK_AVG_COST]: 'Средняя стоимость клика',
+};
+
+const changeFieldValue = async (key: keyof TFirstStepFormik, v: string | number) => {
+    await setFieldValue(key, v);
+    await validateField(key);
+    onChange({ ...values, [key]: v });
+};
+
+const onChangeCostValue = async (key: keyof TFirstStepFormik, v: number) => {
+    await setFieldValue(key, v);
+    if (touched[key]) {
+        await validateField(key);
+        onChange({ ...values, [key]: v });
+    } else {
+        await setFieldTouched(key, true, false);
+        onChange({ ...values, [key]: v });
+    }
+};
+
+const onChangeOptimizationStrategyField = (e: CampaignDTOOptimizationStrategy) => {
+    setValues((prevState) => {
+        const newState = { ...prevState };
+        if (e === CampaignDTOOptimizationStrategy.MAX_CLICK_MIN_COST) {
+            newState.optimizationCost = undefined;
+        } else {
+            newState.optimizationCost = 0;
+        }
+        newState.optimizationStrategy = e;
+        return newState;
+    }).then(() =>
+        onChange({
+            ...values,
+            optimizationStrategy: e,
+            optimizationCost: e === CampaignDTOOptimizationStrategy.MAX_CLICK_MIN_COST ? undefined : 0,
+        }),
+    );
+};
+
+const isShowOptimizationStrategyInput =
+    values.optimizationStrategy &&
+    CampaignDTOOptimizationStrategy[values.optimizationStrategy] ===
+        CampaignDTOOptimizationStrategy.MAX_CLICK_AVG_COST &&
+    values.optimizationGoal === CampaignDTOOptimizationGoal.TRAFFIC;
+
+const strategyOptions = goalsTreeOptions.filter(
+    (o) => !values.optimizationGoal || o.key === (values.optimizationGoal as string),
+)?.[0].strategies;
+
+return (
+    <>
+        <ADTAccordeon data-testid="name-card" title="Рекламная кампания" bordered={false}>
+            <Row gutter={12}>
+                <Col span={24}>
+                    <SBAFormItem data-testid="name-label" label="Название" errors={errors} id="name">
+                        <SBAInput
+                            data-testid="name-input"
+                            type="text"
+                            value={values.name}
+                            onChange={(e) => changeFieldValue?.('name', e.target.value)}
+                        />
+                    </SBAFormItem>
+                </Col>
+            </Row>
+        </ADTAccordeon>
+        <ADTAccordeon data-testid="optimization-card" title="Цель и стратегия" bordered={false}>
+            <SBAFormItem data-testid="optimizationGoal-label" label="Цель" errors={errors} id="optimizationGoal">
+                {/* <Input */}
+                {/*    value={goalsTreeOptions.find((i) => i.key === values.optimizationGoal)?.label} */}
+                {/*    readOnly */}
+                {/*    data-testid="optimizationGoal-input" */}
+                {/*    // suffixIcon={<CustomDownArrow />} */}
+                {/*    // onChange={(e) => changeFieldValue?.('optimizationGoal', e)} */}
+                {/*    // options={goalsTreeOptions.map((o) => ({ label: o.label, value: o.key }))} */}
+                {/* /> */}
+                {/* <Select */}
+                {/*    value={values.optimizationGoal} */}
+                {/*    suffixIcon={<CustomDownArrow />} */}
+                {/*    onChange={(e) => changeFieldValue?.('optimizationGoal', e)} */}
+                {/*    options={goalsTreeOptions.map((o) => ({ label: o.label, value: o.key }))} */}
+                {/* /> */}
+                <Select
+                    // Пока нет других элементов селекта
+                    open={false}
+                    data-testid="optimizationGoal-input"
+                    options={goalsTreeOptions}
+                    defaultValue={goalsTreeOptions.find((i) => i.key === values.optimizationGoal)}
+                    className="campaign-first-step__select"
+                />
+            </SBAFormItem>
+            <SBAFormItem
+                data-testid="optimizationStrategy-label"
+                label="Стратегия"
+                errors={errors}
+                id="optimizationStrategy"
+                className="lg-size"
+            >
+                {values.hasStatistics && (
+                    <>
+                        <div
+                            style={{
+                                gap: '16px',
+                                display: 'flex',
+                                alignItems: 'center',
+                            }}
+                        >
+                            {OptimizationStrategyEnumIcons[values?.optimizationStrategy]}
+                            <span>{OptimizationStrategyEnumNames[values?.optimizationStrategy]}</span>
+                        </div>
+                        <Alert
+                            style={{ marginTop: 24 }}
+                            message="Для рекламных кампаний с накопленной статистикой изменение цели и стратегии
+                                        недоступно. Для выбора другой стратегии необходимо дублировать текущую
+                                        рекламную кампанию или создать новую."
+                            type="info"
+                            showIcon
+                        />
+                    </>
+                )}
+                {!values.hasStatistics && (
+                    <SBACardRadio
+                        value={values.optimizationStrategy}
+                        data-testid="optimizationStrategy-radio"
+                        onChange={onChangeOptimizationStrategyField}
+                        style={{ flexWrap: 'wrap' }}
+                    >
+                        {strategyOptions.map((option) => (
+                            <SBACardRadio.Option
+                                key={option}
+                                icon={OptimizationStrategyEnumIcons[option]}
+                                title={OptimizationStrategyEnumNames[option]}
+                                description={OptimizationStrategyEnumDescriptions[option]}
+                                value={option}
+                                disabled={option === CampaignDTOOptimizationStrategy.MAX_CONVERSION}
+                                style={{ minWidth: '270px', maxWidth: '270px', height: '200px' }}
+                                customFooter={
+                                    option === CampaignDTOOptimizationStrategy.MAX_CONVERSION && (
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                            <IconDraftStatus type="full" /> Скоро
+                                        </div>
+                                    )
+                                }
+                            />
+                        ))}
+                    </SBACardRadio>
+                )}
+            </SBAFormItem>
+            {isShowOptimizationStrategyInput && (
+                <SBAFormItem
+                    label={
+                        optimizationCostTitleDictionary[
+                            values.optimizationStrategy as CampaignDTOOptimizationStrategy.MAX_CLICK_AVG_COST
+                        ]
+                    }
+                    errors={errors}
+                    data-testid="optimizationCost-label"
+                    id="optimizationCost"
+                >
+                    <NumberInput
+                        value={values.optimizationCost}
+                        suffix="₽"
+                        onChange={(e) => onChangeCostValue?.('optimizationCost', +e)}
+                    />
+                </SBAFormItem>
+            )}
+            {currentStepIndex === 0 && (
+                <SBAFormItem>
+                    <Button
+                        data-campaigns-edit-form="goal-next-btn"
+                        data-testid="submit-btn"
+                        style={{ width: '100%' }}
+                        onClick={submitForm}
+                        prefixIcon={<ArrowDown />}
+                        type="dashed"
+                        size="middle"
+                    >
+                        Далее
+                    </Button>
+                </SBAFormItem>
+            )}
+        </ADTAccordeon>
+    </>
+);
+};
