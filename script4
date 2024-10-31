@@ -1,0 +1,257 @@
+import { Button, Datepicker as DatePicker, Tabs } from '@adtech/ui';
+import { NumberInput } from '@adtech/ui/dist/components/Input/NumberInput';
+import ArrowDown from '@assets/SVG/components/arrow-down.svg';
+import { resetEditCampaignError } from '@common/errorsSlice';
+import {
+    campaignEditErrorSlctr,
+    isCampaignBudgetErrorSlctr,
+    isCampaignScheduleErrorSlctr,
+} from '@common/reduxSelectors';
+import { rubFormatter, scrollIntoView } from '@common/utils';
+import ADTAccordeon from '@components/ADTAccordeon/ADTAccordeon';
+import SBAFormItem from '@components/SBAFormItem/SBAFormItem';
+import { useAppDispatch, useAppSelector } from '@src/store';
+import { Col, Row } from 'antd';
+import { useFormik } from 'formik';
+import { Moment } from 'moment';
+import moment from 'moment/moment';
+import * as React from 'react';
+import { FC, useEffect, useMemo } from 'react';
+import * as Yup from 'yup';
+import { BudgetLimitPeriodEnum, BudgetLimitPeriodEnumNames, TCampaignDTO } from '../../Campaigns.model';
+
+type TSecondStepFormik = Pick<TCampaignDTO, 'startDate' | 'endDate' | 'budgetLimit' | 'budgetLimitPeriod'>;
+
+interface IProps {
+    value?: TSecondStepFormik;
+    onChange: (val: TSecondStepFormik, changeStep?: boolean) => void;
+    currentStepIndex: number;
+    isCreate?: boolean;
+}
+
+const CampaignSecondStep: FC<IProps> = ({ value, onChange, currentStepIndex, isCreate }) => {
+    const isBudgetError = useAppSelector(isCampaignBudgetErrorSlctr);
+    const campaignEditError = useAppSelector(campaignEditErrorSlctr);
+    const isScheduleError = useAppSelector(isCampaignScheduleErrorSlctr);
+    const dispatch = useAppDispatch();
+    const { submitForm, errors, values, setFieldValue, setValues, validateField, setFieldTouched, touched } =
+        useFormik<TSecondStepFormik>({
+            initialValues: {
+                startDate: moment().format('YYYY-MM-DD'),
+                endDate: undefined,
+                budgetLimit: 0,
+                budgetLimitPeriod: BudgetLimitPeriodEnum.CAMPAIGN,
+            },
+            validateOnChange: false,
+            validationSchema: Yup.object({
+                startDate: Yup.string().nullable().required('Укажите дату начала'),
+                endDate: Yup.string()
+                    .nullable()
+                    .when('budgetLimitPeriod', {
+                        is: (period: any) => period === BudgetLimitPeriodEnum.CAMPAIGN,
+                        then: Yup.string().nullable().required('Укажите дату окончания'),
+                    }),
+                budgetLimit: Yup.number()
+                    .nullable()
+                    .typeError('Некорректное значение')
+                    .moreThan(0, 'Бюджет должен быть больше 0')
+                    .required('Обязательное поле'),
+                budgetLimitPeriod: Yup.mixed<BudgetLimitPeriodEnum>()
+                    .nullable()
+                    .oneOf([...Object.values(BudgetLimitPeriodEnum), null]),
+            }),
+            onSubmit: (body) => {
+                onChange(body, true);
+            },
+        });
+
+
+const changeBudget = async (v: BudgetLimitPeriodEnum) => {
+    await setFieldValue('budgetLimitPeriod', v);
+    await validateField('endDate');
+    await validateField('budgetLimitPeriod');
+    onChange({ ...values, budgetLimitPeriod: v });
+};
+
+const changeFieldValue = (key: keyof TSecondStepFormik, v: string | null) => {
+    setFieldValue(key, v, true);
+    onChange({ ...values, [key]: v });
+};
+
+const changeNumberInputFieldValue = async (key: keyof TSecondStepFormik, v: number) => {
+    await setFieldValue(key, v);
+    if (touched[key]) {
+        await validateField(key);
+    } else {
+        await setFieldTouched(key, true, false);
+        onChange({ ...values, [key]: v });
+    }
+    if (touched[key]) onChange({ ...values, [key]: v });
+};
+
+useEffect(() => {
+    if (value) {
+        setValues(value, !isCreate);
+    }
+}, [value, setValues, isCreate]);
+
+// Удаление ошибки 409 из стора при isScheduleError
+useEffect(() => {
+    if (isScheduleError) scrollIntoView('startDate');
+    return () => {
+        if (isScheduleError) dispatch(resetEditCampaignError());
+    };
+}, [values.startDate, values.endDate, values.budgetLimitPeriod, isScheduleError, dispatch]);
+
+// Удаление ошибки 409 из стора при isBudgetError
+useEffect(() => {
+    if (isBudgetError) scrollIntoView('budgetLimit');
+    return () => {
+        if (isBudgetError) dispatch(resetEditCampaignError());
+    };
+}, [values.budgetLimit, isBudgetError, dispatch]);
+
+// Отображение ошибки в зависимости от наличи я в сторе 409 при isScheduleError
+const scheduleValidationErrors = useMemo(() => {
+    if (isScheduleError)
+        return {
+            startDate: 'Не удалось выполнить действие. Проверьте график групп',
+            endDate: values.endDate ? 'Не удалось выполнить действие. Проверьте график групп' : undefined,
+        };
+    return errors;
+}, [isScheduleError, errors, values.endDate]);
+
+// Отображение ошибки в зависимости от наличи я в сторе 409 при isBudgetError
+const budgetLimitValidationErrors = useMemo(() => {
+    if (isBudgetError)
+        return {
+            budgetLimit:
+                'Не удалось выполнить действие. ' +
+                'Новый бюджет ниже расхода по кампании' +
+                `${
+                    campaignEditError?.data?.params?.budgetSpent
+                        ? ` – ${rubFormatter.format(campaignEditError?.data?.params?.budgetSpent)}`
+                        : '.'
+                }`,
+        };
+    return errors;
+}, [errors, isBudgetError, campaignEditError?.data?.params?.budgetSpent]);
+
+const getDisabledStartDate = (d: Moment) =>
+    !d || (values?.endDate && d.isAfter(values?.endDate)) || d.isBefore(moment().subtract(1, 'day'));
+
+const getDisabledEndDate = (d: Moment) =>
+    !d || d.isBefore(values?.startDate) || d.isBefore(moment().subtract(1, 'day'));
+const options = [
+    {
+        label: BudgetLimitPeriodEnumNames[BudgetLimitPeriodEnum.CAMPAIGN],
+        value: BudgetLimitPeriodEnum.CAMPAIGN,
+        key: BudgetLimitPeriodEnum.CAMPAIGN,
+    },
+    {
+        label: BudgetLimitPeriodEnumNames[BudgetLimitPeriodEnum.WEEK],
+        value: BudgetLimitPeriodEnum.WEEK,
+        key: BudgetLimitPeriodEnum.WEEK,
+    },
+];
+
+return (
+    <ADTAccordeon
+        collapsed={currentStepIndex < 1}
+        disabled={currentStepIndex < 1}
+        title="График и бюджет"
+        bordered={false}
+        data-testid="card"
+    >
+        <SBAFormItem data-testid="dates-label" label="График кампании" bold>
+            <Row gutter={12}>
+                <Col span={12}>
+                    <SBAFormItem
+                        data-testid="startDate-label"
+                        label="Дата начала"
+                        errors={scheduleValidationErrors}
+                        id="startDate"
+                    >
+                        <DatePicker
+                            data-testid="startDate-picker"
+                            format="DD.MM.YYYY"
+                            style={{ width: '100%' }}
+                            disabledDate={getDisabledStartDate}
+                            value={values.startDate ? moment(values.startDate) : null}
+                            onChange={(dates) =>
+                                changeFieldValue?.('startDate', dates?.format('YYYY-MM-DD') || null)
+                            }
+                        />
+                    </SBAFormItem>
+                </Col>
+                <Col span={12}>
+                    <SBAFormItem
+                        data-testid="endDate-label"
+                        label="Дата окончания"
+                        errors={scheduleValidationErrors}
+                        id="endDate"
+                    >
+                        <DatePicker
+                            data-testid="endDate-picker"
+                            format="DD.MM.YYYY"
+                            style={{ width: '100%' }}
+                            disabledDate={getDisabledEndDate}
+                            value={values.endDate ? moment(values.endDate) : null}
+                            onChange={(dates) => changeFieldValue?.('endDate', dates?.format('YYYY-MM-DD') || null)}
+                        />
+                    </SBAFormItem>
+                </Col>
+            </Row>
+        </SBAFormItem>
+        <SBAFormItem
+            data-testid="budgetLimitPeriod-label"
+            errors={errors}
+            id="budgetLimitPeriod"
+            label="Бюджет"
+            bold
+        >
+            <Tabs
+                className="budgetLimitPeriod-segmented"
+                data-testid="budgetLimitPeriod-segmented"
+                options={options}
+                value={values.budgetLimitPeriod}
+                onChange={changeBudget}
+            />
+        </SBAFormItem>
+        <SBAFormItem
+            data-testid="budgetLimit-label"
+            errors={budgetLimitValidationErrors}
+            id="budgetLimit"
+            label="Бюджет рекламной кампании"
+            description={
+                <div data-testid="budgetLimit-description">
+                    Средства будут расходоваться с баланса рекламного кабинета.
+                </div>
+            }
+        >
+            <NumberInput
+                value={values.budgetLimit}
+                suffix="₽"
+                onChange={(e) => changeNumberInputFieldValue?.('budgetLimit', +e)}
+            />
+        </SBAFormItem>
+        {currentStepIndex === 1 && (
+            <SBAFormItem>
+                <Button
+                    data-testid="submit-btn"
+                    style={{ width: '100%' }}
+                    onClick={submitForm}
+                    prefixIcon={<ArrowDown />}
+                    type="dashed"
+                    size="middle"
+                    data-campaigns-edit-form="budget-next-btn"
+                >
+                    Далее
+                </Button>
+            </SBAFormItem>
+        )}
+    </ADTAccordeon>
+);
+};
+
+export default CampaignSecondStep;
