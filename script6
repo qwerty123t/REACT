@@ -1,0 +1,323 @@
+import { Button } from '@adtech/ui';
+import { DMPSegmentEnum } from '@common/Common.model';
+import { useGetSegmentsQuery } from '@common/api/dictionaries.api';
+import { useAddAdGroupMutation, useEditAdGroupMutation } from '@common/api/go.api';
+import { setAdGroupError } from '@common/errorsSlice';
+import { message } from '@common/messages';
+import { getTypeSegmentsMap, handleErrorsExceptions, scrollIfExist } from '@common/utils';
+import ADTAccordeon from '@components/ADTAccordeon/ADTAccordeon';
+import { FederationLazyComponent } from '@components/FederationLazyComponent';
+import { AdGroupDTO } from '@entities/AdGroupDTO';
+import { CampaignDTO } from '@entities/CampaignDTO';
+import { FailedToLoadDataAlert } from '@entities/FailedToLoadDataAlert';
+import { TargetGroupDTO } from '@entities/TargetGroupDTO';
+import { TargetGroupDTOType } from '@entities/TargetGroupDTOType';
+import { allTime } from '@entities/scheduleTime';
+import { useAppDispatch } from '@src/store';
+import { Space } from 'antd';
+import { CheckboxValueType } from 'antd/es/checkbox/Group';
+import Form from 'antd/lib/form/Form';
+import { useFormik } from 'formik';
+import moment from 'moment';
+import * as React from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import ArrowRight from '../../../assets/SVG/components/arrow-right.svg';
+import { adGroupValidationSchema, TAdGroupDTO } from '../AdGroups.model';
+import { TargetingsCard } from './TargetingsCard';
+import AdGroupFirstStep from './steps/AdGroupFirstStep/AdGroupFirstStep';
+import { AdGroupScheduleCard } from './steps/AdGroupScheduleCard/AdGroupScheduleCard';
+import AdGroupSecondStep from './steps/AdGroupSecondStep/AdGroupSecondStep';
+import AdGroupThreeStep from './steps/AdGroupThreeStep';
+
+interface IProps {
+    adGroup: AdGroupDTO;
+    campaign?: CampaignDTO;
+    campaignId: number;
+    loading: boolean;
+    isCreate?: boolean;
+    onChange?: (newCampaign) => void;
+    refetchAdGroups: () => void;
+    isGetAdGroupError?: boolean;
+    adGroupForPredictor?: any;
+}
+
+export const adGroupsEditFormInitialValues: TAdGroupDTO = {
+    campaignId: 0,
+    name: 'Группа',
+    endDate: undefined,
+    startDate: undefined,
+    schedule: {
+        isConsiderTimezone: false,
+        isShowOnHolidays: true,
+        id: undefined,
+        ...allTime,
+    },
+    version: undefined,
+    targetGroups: [],
+};
+
+const AdGroupsEditForm: FC<IProps> = ({
+    adGroup,
+    campaign,
+    campaignId,
+    refetchAdGroups,
+    isCreate,
+    onChange,
+    loading,
+    isGetAdGroupError,
+}) => {
+    const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+    const { data: segments = [] } = useGetSegmentsQuery();
+    const [addAdGroup, { isLoading: isAddAdGroupLoading }] = useAddAdGroupMutation();
+
+
+const supTypeSegmentsMap = useMemo(() => getTypeSegmentsMap(segments), [segments]);
+
+const dispatch = useAppDispatch();
+const [editAdGroup] = useEditAdGroupMutation();
+const navigate = useNavigate();
+
+const { submitForm, validateForm, values, setFieldValue, errors, setValues } = useFormik<TAdGroupDTO>({
+    initialValues: adGroupsEditFormInitialValues,
+    validateOnChange: false,
+    validateOnMount: false,
+    validationSchema: adGroupValidationSchema,
+    onSubmit: async () => {},
+});
+
+const onSubmit = (redirect: boolean) => async () => {
+    if (!isCreate) {
+        await editAdGroup({
+            id: adGroup.id,
+            body: values,
+        }).unwrap();
+    } else {
+        try {
+            const newAdGroup = await addAdGroup({ ...values, campaignId }).unwrap();
+
+            message.success('Группа объявлений создана');
+
+            if (redirect) {
+                navigate(
+                    `/campaigns/create?campaignId=${campaignId}&selectedCampaignId=${campaignId}&adGroupId=${newAdGroup?.id}&selectedAdGroupId=${newAdGroup?.id}`,
+                );
+            } else {
+                navigate('/campaigns');
+            }
+            refetchAdGroups();
+        } catch (e: any) {
+            setCurrentStepIndex(6);
+            handleErrorsExceptions(e, [401, 403, 404, 409, 500]);
+            if (e.status === 404) message.error('Не удалось выполнить действие. Кампания не найдена');
+            if (e.status === 409) {
+                dispatch(setAdGroupError(e));
+            }
+            setTimeout(() => document.getElementById('geowidget')?.scrollIntoView({ behavior: 'smooth' }), 70);
+        }
+    }
+};
+
+useEffect(() => {
+    if (adGroup) {
+        // const dto = adGroupValidationSchema.cast(adGroup, {
+        //     stripUnknown: true,
+        // });
+        setValues(adGroup);
+        setCurrentStepIndex(6);
+
+        // TODO Изза этого пользователь думает что дата есть, а по факту ее нет...
+        // if (!adGroup.startDate && campaign && campaign.startDate) {
+        //   setFieldValue('startDate', campaign.startDate);
+        // }
+        // if (!adGroup.endDate && campaign && campaign.endDate) {
+        //   setFieldValue('endDate', campaign.endDate);
+        // }
+    }
+    if (campaignId && isCreate) {
+        setFieldValue('campaignId', campaignId);
+    }
+}, [adGroup, campaignId, isCreate, setFieldValue, setValues]);
+
+useEffect(() => {
+    if (!isCreate) return;
+    if (campaign) {
+        setValues({
+            ...values,
+            endDate: moment(campaign.endDate).isBefore(moment(), 'day')
+                ? moment().format('YYYY-MM-DD')
+                : campaign.endDate,
+            startDate: moment(campaign.startDate).isBefore(moment(), 'day')
+                ? moment().format('YYYY-MM-DD')
+                : campaign.startDate,
+        });
+    }
+}, [campaign]);
+
+const checkDMPSegmentExist = (tg: TargetGroupDTO, type: DMPSegmentEnum) =>
+    tg.type === TargetGroupDTOType.DMP_SEGMENT &&
+    supTypeSegmentsMap[type].some((i) => tg.values.some((v) => v.valueId === i.id));
+
+const handleSegmentsChange = (type: DMPSegmentEnum) => (checked: CheckboxValueType[]) => {
+    let targetGroups = values.targetGroups || [];
+
+    // Удаленный
+    if (!checked.length) {
+        targetGroups = targetGroups.filter((tg) => !checkDMPSegmentExist(tg, type) && tg.values.length);
+    } else {
+        const newValue: TargetGroupDTO = {
+            type: TargetGroupDTOType.DMP_SEGMENT,
+            values: checked.map((c) => ({ valueId: c })),
+        };
+
+        // Новый
+        if (!targetGroups.find((tg) => checkDMPSegmentExist(tg, type))) {
+            targetGroups = [...targetGroups, newValue];
+        }
+
+        // Обновленный
+        else {
+            targetGroups = targetGroups.map((tg) =>
+                checkDMPSegmentExist(tg, type) ? { ...tg, values: newValue.values } : tg,
+            );
+        }
+    }
+    setFieldValue('targetGroups', targetGroups);
+    onChange?.({ ...values, targetGroups });
+};
+
+const getValueByType = (type: TargetGroupDTOType, subtype?: DMPSegmentEnum) =>
+    values.targetGroups
+        ?.find(
+            (i) =>
+                i.type === type &&
+                (!subtype || supTypeSegmentsMap[subtype]?.some((s) => i.values.some((v) => v.valueId === s.id))),
+        )
+        ?.values?.map(({ valueId }) => valueId);
+
+const spaceParent = document.getElementById('spaceParent');
+
+if (spaceParent && spaceParent.children[1]) {
+    spaceParent.children[1].style.position = 'sticky';
+    spaceParent.children[1].style.top = '9px';
+}
+
+const onChangeStep = (stepIndex: number) => (newValues: any, changeStep: boolean) => {
+    setValues({ ...values, ...newValues });
+    if (changeStep) {
+        setCurrentStepIndex(stepIndex);
+        setTimeout(
+            () =>
+                document
+                    .getElementById('adgroup-form-submit-btn')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'end' }),
+            50,
+        );
+    }
+    onChange?.({ ...values, ...newValues });
+};
+
+if (isGetAdGroupError) {
+    return (
+        <>
+            <ADTAccordeon title="Группа объявлений" bordered={false} style={{ width: '100%' }} showArrow={false}>
+                <FailedToLoadDataAlert />
+            </ADTAccordeon>
+            <FederationLazyComponent
+                errorTitle="Охват аудитории"
+                scope="predictorFrontend"
+                module="./Predictor"
+                selector={(module) => module.Predictor}
+                props={{ isError: true }}
+            />
+        </>
+    );
+}
+
+return (
+    <Space
+        style={{ display: 'flex', alignItems: 'baseline' }}
+        data-adgroups-edit-form="adGroupsEditForm"
+        id="spaceParent"
+    >
+        <Form layout="vertical" autoComplete="off" onFinish={() => scrollIfExist({ validateForm, submitForm })}>
+            <AdGroupFirstStep
+                value={values}
+                onChange={onChangeStep(1)}
+                currentStepIndex={currentStepIndex}
+                handleSegmentsChange={handleSegmentsChange}
+                segments={segments}
+                getValueByType={getValueByType}
+                isCreate={isCreate}
+            />
+            <AdGroupSecondStep
+                onChange={onChangeStep(2)}
+                currentStepIndex={currentStepIndex}
+                handleSegmentsChange={handleSegmentsChange}
+                getValueByType={getValueByType}
+            />
+            <AdGroupThreeStep
+                values={values}
+                setFieldValue={setFieldValue}
+                campaign={campaign}
+                onChange={onChangeStep(3)}
+                currentStepIndex={currentStepIndex}
+                editFormErrors={errors}
+            />
+            <AdGroupScheduleCard
+                value={values}
+                loading={loading}
+                campaign={campaign}
+                onChange={onChangeStep(4)}
+                currentStepIndex={currentStepIndex}
+                editFormErrors={errors}
+            />
+            <TargetingsCard
+                values={values}
+                setFieldValue={setFieldValue}
+                getValueByType={getValueByType}
+                onChange={onChangeStep(5)}
+                currentStepIndex={currentStepIndex}
+            />
+            {/* <PlacementWidget */}
+            {/*    placements={placements} */}
+            {/*    values={values.targetGroups} */}
+            {/*    onChange={handleTargetGroupsChange(TargetGroupDTOType.PLACEMENT)}/> */}
+            {isCreate && (
+                <div
+                    style={{
+                        display: 'flex',
+                        marginTop: '24px',
+                        gap: '8px',
+                    }}
+                >
+                    <Button
+                        type="dashed"
+                        onClick={onSubmit(false)}
+                        disabled={!values.name.length}
+                        loading={isAddAdGroupLoading}
+                        data-adgroups-edit-form="createAndClose"
+                    >
+                        Сохранить и выйти
+                    </Button>
+                    <Button
+                        disabled={!values.name.length}
+                        onClick={onSubmit(true)}
+                        style={{ width: '100%' }}
+                        suffixIcon={<ArrowRight />}
+                        data-adgroups-edit-form="createAdBtn"
+                        loading={isAddAdGroupLoading}
+                        id="adgroup-form-submit-btn"
+                    >
+                        Создать объявление
+                    </Button>
+                </div>
+            )}
+        </Form>
+        {/* <GaugeChartContainer size="sm" targetGroups={values.targetGroups} /> */}
+    </Space>
+);
+};
+
+export default AdGroupsEditForm;
