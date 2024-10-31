@@ -1,0 +1,151 @@
+import * as React from 'react';
+import { PREFIX_CLS } from '../../constants';
+import { IconFile, IconImage } from '../../icons';
+import './DragAndDrop.less';
+import { IGenericObject } from '../../models';
+import { Button } from '../Button/Button';
+import { EFileTypes, ETranslateTypes } from './enums';
+import { nestedTypograf } from '../../utils/nestedTypograf';
+
+export type TEvent =
+    | React.KeyboardEvent<HTMLInputElement>
+    | React.ChangeEvent<HTMLInputElement>
+    | React.MouseEvent<HTMLElement, MouseEvent>;
+
+type TDEvent = React.MouseEvent & {
+    dataTransfer: DataTransfer;
+};
+
+export type TDragAndDropProps = {
+    type: keyof typeof EFileTypes;
+    hasChooseButton?: boolean;
+    onChoseClick?: () => void;
+    choseButtonLabel?: string;
+    choseLocationLabel?: string;
+    onDragOver?: (e?: TEvent) => void;
+    onDrop?: (e?: TDEvent) => void;
+    onDragEnter?: (e?: TEvent) => void;
+    onChange?: (e?: TEvent) => void;
+    descriptionText?: React.ReactNode;
+    accept?: string;
+    style?: React.CSSProperties;
+    multiple?: boolean;
+    chooseButtonMetrics?: IGenericObject;
+    uploadButtonMetrics?: IGenericObject;
+    dataAttribute?: IGenericObject;
+};
+
+export const DragAndDrop: React.FC<TDragAndDropProps> = ({
+    type,
+    style = {},
+    onChange,
+    onDragEnter,
+    onDrop,
+    onDragOver,
+    descriptionText,
+    accept,
+    hasChooseButton,
+    onChoseClick,
+    choseButtonLabel = 'выберите',
+    choseLocationLabel = 'из хранилища',
+    multiple = false,
+    chooseButtonMetrics,
+    uploadButtonMetrics,
+    dataAttribute,
+}) => {
+    const inputRef = React.useRef<HTMLInputElement>(null);
+    const getTypeIcon = () => {
+        switch (type) {
+            case EFileTypes.file:
+                return <IconFile />;
+            case EFileTypes.image:
+                return <IconImage />;
+            default:
+                return '';
+        }
+    };
+
+
+const getTypeTitle = () => {
+    switch (type) {
+        case EFileTypes.file:
+            return ETranslateTypes[EFileTypes.file];
+        case EFileTypes.image:
+            return ETranslateTypes[EFileTypes.image];
+        default:
+            return '';
+    }
+};
+
+const getChooseButtonFileLabel = () => {
+    switch (type) {
+        case EFileTypes.image:
+            return ETranslateTypes.imagePlural;
+        case EFileTypes.file:
+        default:
+            return ETranslateTypes.filePlural;
+    }
+};
+
+const handleClick = () => {
+    inputRef?.current?.click();
+};
+
+const hasChoseButton = () => Boolean(hasChooseButton && onChoseClick && choseButtonLabel);
+
+const handleInputChange = (event?: TEvent) => {
+    if (!inputRef.current || !onChange) {
+        return;
+    }
+
+    onChange(event);
+
+    inputRef.current.value = '';
+};
+
+
+
+return (
+    <div
+        className={`${PREFIX_CLS}-drag-and-drop`}
+        onDragOver={onDragOver}
+        onDragEnter={onDragEnter}
+        onDrop={onDrop}
+        style={style}
+    >
+        {getTypeIcon()}
+        <div className="text-wrapper">
+            <span className="drag-and-drop-title">
+                Перетащите {getTypeTitle()}
+                {hasChoseButton() ? ', ' : ' или '}
+                <Button type="link" onClick={handleClick} className="drag-and-drop-link" {...uploadButtonMetrics}>
+                    загрузите
+                </Button>
+                 с компьютера
+                {hasChoseButton() ? (
+                    <>
+                         или 
+                        <Button type="link" onClick={onChoseClick} {...chooseButtonMetrics}>
+                            {choseButtonLabel}
+                        </Button>
+                         {getChooseButtonFileLabel()} 
+                        {choseLocationLabel}
+                    </>
+                ) : (
+                    ''
+                )}
+            </span>
+            <div className="drag-and-drop-description">{descriptionText}</div>
+        </div>
+        <input
+            ref={inputRef}
+            type="file"
+            accept={accept}
+            onChange={handleInputChange}
+            multiple={multiple}
+            className={`${PREFIX_CLS}-drag-and-drop--hidden-input`}
+            {...dataAttribute}
+        />
+    </div>
+);
+};
