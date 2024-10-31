@@ -1,0 +1,138 @@
+import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '..';
+import { PREFIX_CLS } from '../../constants';
+import { IconCheckMark } from '../../icons';
+import { isObject, joinCssClasses } from '../../utils';
+import { Card, TCardProps } from '../Card/Card';
+
+export type TRadioCardProps = TCardProps & {
+    cardValue?: any;
+    currentSelectedItem?: any;
+    propertyToCompare?: string;
+    onClick: () => void;
+    onCardClick?: () => void;
+    customButton?: ReactNode | null;
+    buttonLabel?: string;
+    isViewMode?: boolean;
+    customElement?: ReactNode | null;
+    isDisabled?: boolean;
+};
+
+const overlayDimensions = (cardContainerRef: React.MutableRefObject<HTMLDivElement | null>) => {
+    if (!cardContainerRef.current) {
+        return 0;
+    }
+
+
+const card = cardContainerRef.current.querySelector('.SBA-card');
+
+if (!card) {
+    return 0;
+}
+
+return Math.sqrt(card.clientWidth ** 2 + card.clientHeight ** 2);
+};
+
+const overlayOffset = (cardContainerRef: React.MutableRefObject<HTMLDivElement | null>, isSelected: boolean) => {
+    const dimensions = overlayDimensions(cardContainerRef);
+    // -300% is for correct top right corner fill animation upon first activation
+    const offset = { top: '-300%', left: '-100%' };
+
+
+if (!cardContainerRef.current) {
+    return offset;
+}
+
+const card = cardContainerRef.current.querySelector('.SBA-card');
+const overlayElement = cardContainerRef.current.querySelector('.card-container--gradient-overlay');
+
+if (!overlayElement || !card) {
+    return offset;
+}
+
+const overlayHypotenuse = dimensions * Math.sqrt(2);
+if (!isSelected) {
+    // -300% is for correct top right corner fill animation upon subsequent activations
+    offset.top = `-${overlayHypotenuse + 40}px`;
+    offset.left = `-${overlayHypotenuse / 2}px`;
+    return offset;
+}
+
+// '-10' and '5' is for correct overlay centering
+offset.top = `${card.clientHeight / 2 - overlayHypotenuse / 2 - 10}px`;
+offset.left = `${card.clientWidth / 2 + 5}px`;
+
+return offset;
+};
+
+export const RadioCard = ({
+    children,
+    onClick,
+    onCardClick,
+    cardValue,
+    currentSelectedItem,
+    propertyToCompare,
+    customButton,
+    buttonLabel = 'Выбрать',
+    isViewMode,
+    customElement,
+    isDisabled,
+    ...otherProps
+}: TRadioCardProps) => {
+    const cardContainerRef: React.MutableRefObject<HTMLDivElement | null> = useRef<HTMLDivElement>(null);
+    const [gradientOverlayStyles, setGradientOverlayStyles] = useState<any>({});
+
+
+const isSelected = useMemo(
+    () =>
+        propertyToCompare && isObject(currentSelectedItem) && isObject(cardValue)
+            ? currentSelectedItem[propertyToCompare] === cardValue[propertyToCompare]
+            : currentSelectedItem === cardValue,
+    [cardValue, currentSelectedItem, propertyToCompare],
+);
+
+useEffect(() => {
+    setGradientOverlayStyles({
+        // these '+20' pixels are providing easier animation work substantially
+        width: overlayDimensions(cardContainerRef) + 20,
+        height: overlayDimensions(cardContainerRef) + 20,
+        ...overlayOffset(cardContainerRef, isSelected),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [isSelected, cardContainerRef.current]);
+
+return (
+    <div
+        ref={cardContainerRef}
+        className={joinCssClasses([
+            'card-container',
+            isSelected ? 'card-container__selected' : '',
+            onCardClick ? 'card-container__hover' : '',
+        ])}
+        onClick={!isViewMode && onCardClick ? onCardClick : () => {}}
+        onKeyDown={() => {}}
+    >
+        <div style={gradientOverlayStyles} className="card-container--gradient-overlay" />
+        <Card
+            {...otherProps}
+            className={joinCssClasses([
+                isSelected ? `${PREFIX_CLS}-card__selected` : '',
+                isViewMode ? `${PREFIX_CLS}-card--view` : '',
+                isDisabled ? `${PREFIX_CLS}-card--disabled` : '',
+            ])}
+        >
+            {children}
+            {customElement ? <div className={`${PREFIX_CLS}-card__custom-element`}>{customElement}</div> : null}
+            <article className={`${PREFIX_CLS}-card-radio--button-container`}>
+                {customButton}
+                {!isViewMode && !isDisabled && (
+                    <Button onClick={onCardClick ? () => {} : onClick} type="dashed" size="small">
+                        {isSelected ? <IconCheckMark /> : ''}
+                        {buttonLabel}
+                    </Button>
+                )}
+            </article>
+        </Card>
+    </div>
+);
+};
